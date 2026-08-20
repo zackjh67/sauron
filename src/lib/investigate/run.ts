@@ -1,0 +1,62 @@
+import Anthropic from "@anthropic-ai/sdk";
+import type { ParsedSentryError } from "../sentry";
+import type { ProjectRow } from "../supabase-ops";
+import { buildInvestigationTools, type Report } from "./tools";
+
+const client = new Anthropic();
+
+const SYSTEM_PROMPT = `You are investigating a production error reported by Sentry, for a codebase
+hosted on GitHub and running as Next.js functions on Vercel with a Supabase backend.
+
+You have tools to read the actual source at the commit that was running, and to query both
+Vercel function logs and Supabase logs (Postgres/Edge Functions/Auth) around the time of the
+error. Use them as needed — start from the stack trace, read the relevant files, and pull logs
+in a window around the event timestamp to see what request/state led here. Don't guess at code
+you haven't read.
+
+When you have enough to explain what happened, call submit_report exactly once. If you can't
+identify a safe, well-scoped fix, still submit a report — set proposed_fix to null and explain
+why in risk_notes rather than proposing something you're not confident in. Keep any proposed fix
+minimal and scoped to the actual bug; don't refactor unrelated code.`;
+
+export async function investigate(project: ProjectRow, error: ParsedSentryError): Promise<Report> {
+  let capturedReport: Report | null = null;
+  const tools = buildInvestigationTools(project, (r) => {
+    capturedReport = r;
+  });
+
+  const userPrompt = [
+    `Sentry event: ${error.eventId}`,
+    `Project: ${project.name} (repo ${project.github_repo})`,
+    `Environment: ${error.environment ?? "unknown"}`,
+    `Release / commit: ${error.release ?? "unknown"}`,
+    `Exception type: ${error.exceptionType ?? "unknown"}`,
+    `Message: ${error.message}`,
+    `Culprit: ${error.culprit ?? "unknown"}`,
+    `Sentry issue URL: ${error.issueUrl ?? "n/a"}`,
+    "",
+    "Stack frames (most relevant last, per Sentry convention):",
+    JSON.stringify(error.frames, null, 2),
+  ].join("\n");
+
+  const runner = client.beta.messages.toolRunner({
+    model: "claude-opus-5",
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "high" },
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+    tools,
+    messages: [{ role: "user", content: userPrompt }],
+  });
+
+  for await (const message of runner) {
+    if (message.stop_reason === "pause_turn") {
+      runner.pushMessages({ role: "assistant", content: message.content });
+    }
+  }
+
+  if (!capturedReport) {
+    throw new Error("Investigation ended without calling submit_report");
+  }
+  return capturedReport;
+}
