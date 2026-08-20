@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "fixer",
+  title: "Sauron",
   description: "Sentry error auto-investigator",
 };
 
