@@ -13,8 +13,19 @@ PR. Nothing merges itself; you review everything.
 ```
 Sentry (error) --webhook (HMAC signed)--> /api/webhooks/sentry
                                                  |
-                                   look up the project in the registry
-                                   (sentry slug -> repo, vercel project, supabase project)
+                                   look up the project in the registry, insert
+                                   an investigation row with status "queued"
+                                                 |
+                                                 v
+                                          [ the queue ]
+                                                 |
+              +----------------------------------+----------------------------------+
+              |                                                                      |
+   daily cron, once/day (unless paused):                          dashboard, any time:
+   picks the oldest queued item                                   "Run now" or "Discard"
+   across all enabled projects                                    on any queued item
+              |                                                                      |
+              +----------------------------------+----------------------------------+
                                                  |
                               Claude (Opus 5, agentic tool use), investigates:
                                 - read_github_file / list_github_dir
@@ -33,6 +44,12 @@ Claude decides what to look at — it isn't handed a fixed bundle of context. It
 frames, pulls the actual source at the commit that was running, and queries both log sources
 in a window around the event before deciding what happened.
 
+Every incoming error lands in the queue rather than running immediately: a cron job runs it
+down to one automatic investigation per day, and the dashboard (`/`, Basic Auth protected)
+lets you run or discard anything else in the queue on your own schedule. A single pause
+toggle on that dashboard stops both the cron and any "Run now" clicks — the queue keeps
+filling while paused, nothing just gets silently investigated in the background.
+
 ## Why it exists
 
 Manually triaging a Sentry alert usually means three tabs: GitHub for the code, Vercel for
@@ -43,9 +60,15 @@ leaves you a PR to review instead of a cold start every time.
 
 ```
 src/
+  middleware.ts                        Basic Auth in front of the dashboard + investigation/settings APIs
   app/
-    api/webhooks/sentry/route.ts       Sentry webhook receiver
+    page.tsx, dashboard-actions.tsx    the queue dashboard (run/discard/pause)
+    api/webhooks/sentry/route.ts       Sentry webhook receiver -> enqueues
     api/ingest/vercel-logs/route.ts    Vercel Log Drain receiver
+    api/cron/daily-investigation/      once/day queue pop (Vercel Cron, CRON_SECRET-gated)
+    api/investigations/[id]/run/       dashboard "run now"
+    api/investigations/[id]/discard/   dashboard "discard"
+    api/settings/pause/                dashboard pause/resume toggle
   lib/
     sentry.ts, sentry-api.ts           webhook verification + Sentry API
     github.ts                          GitHub App auth, file reads, draft PRs
@@ -53,11 +76,12 @@ src/
     slack.ts                          report notifications
     secrets.ts                         per-account credential resolution
     investigate/
+      queue.ts                        claim/run/discard queue items, pause flag
       tools.ts                        the tools Claude gets during investigation
       run.ts                          the agentic Tool Runner loop
       pr.ts                           turns a report into a draft PR
       orchestrate.ts                  wires investigate -> PR -> Slack -> DB
-supabase/migrations/0001_init.sql      registry + investigations + ingested logs schema
+supabase/migrations/0001_init.sql      registry + investigation queue + settings + ingested logs schema
 ```
 
 ## Multiple accounts and orgs
@@ -82,9 +106,22 @@ These happen in dashboards, not in this repo:
 | 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs` (needs a plan that supports Log Drains) | `VERCEL_LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
+| 8 | Pick a dashboard password. `vercel.json` already schedules the daily cron (08:00 UTC — edit the cron expression to taste) | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
 
 Copy `.env.example` to `.env.local` for local dev; set the same vars on the Vercel project
 this app deploys to.
+
+## The dashboard
+
+`/` (Basic Auth protected — see step 8 above) shows the queue and lets you act on it:
+
+- **Queue** — everything waiting to be investigated. **Run now** kicks one off in the
+  background; **Discard** drops it without ever investigating it.
+- **Pause / Resume** — one button. While paused, the daily cron no-ops and "Run now" is
+  refused (423). Sentry errors still queue up as normal; they just don't get investigated
+  until you resume.
+- **Recent** — the last 20 completed/failed/discarded investigations, with a link to the
+  draft PR when one was opened.
 
 ## Local dev
 
@@ -109,3 +146,14 @@ npm run dev
 - **`vercel_logs` grows unbounded** from the drain. The migration has a commented-out prune
   query — schedule it (pg_cron, or an external cron hitting a small maintenance route) once
   the drain is live.
+- **Pause blocks all runs, not just the automatic one.** A paused dashboard refuses "Run now"
+  too (423), not only the daily cron — treated as one global stop rather than two separate
+  switches. If you'd rather pause only the automatic side and keep manual runs available,
+  that's a small change in `src/app/api/investigations/[id]/run/route.ts` (drop the
+  `isPaused()` check there).
+- **The cron does exactly one item per day**, oldest queued first, no priority/project
+  weighting. Reordering the queue isn't supported — discard-and-let-it-reappear-via-Sentry
+  is the only way to "skip" one for now.
+- **Dashboard auth is HTTP Basic, not a real login.** Fine for a small team hitting it
+  directly; if you want SSO/audit logs instead, Vercel's built-in Deployment Protection is
+  the lower-effort upgrade over building auth into the app.

@@ -26,12 +26,25 @@ export interface ProjectRow {
   enabled: boolean;
 }
 
+export type InvestigationStatus = "queued" | "running" | "done" | "failed" | "discarded";
+
 export interface InvestigationRow {
   id: string;
   sentry_event_id: string;
   project_id: string;
-  status: "running" | "done" | "failed";
+  sentry_error: unknown;
+  status: InvestigationStatus;
+  run_trigger: "auto" | "manual" | null;
   report: unknown;
   pr_url: string | null;
   error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AppSettingsRow {
+  id: 1;
+  paused: boolean;
+  updated_at: string;
 }

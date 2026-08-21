@@ -1,7 +1,5 @@
-import { after } from "next/server";
 import { verifySentrySignature, SIGNATURE_HEADER, parseSentryErrorPayload } from "@/lib/sentry";
 import { opsClient, type ProjectRow } from "@/lib/supabase-ops";
-import { runInvestigation } from "@/lib/investigate/orchestrate";
 
 export async function POST(req: Request) {
   const rawBody = await req.text();
@@ -35,26 +33,20 @@ export async function POST(req: Request) {
     return new Response("ok", { status: 200 });
   }
 
-  const { data: investigation, error: insertError } = await db
+  // Just enqueue — nothing runs from here. The daily cron picks the oldest
+  // queued item automatically; anything else runs from the dashboard.
+  const { error: insertError } = await db
     .from("investigations")
-    .insert({ sentry_event_id: error.eventId, project_id: project.id, status: "running" })
-    .select("id")
-    .single();
+    .insert({
+      sentry_event_id: error.eventId,
+      project_id: project.id,
+      sentry_error: error,
+      status: "queued",
+    });
 
-  if (insertError || !investigation) {
+  if (insertError) {
     console.error("failed to insert investigation row", insertError);
-    return new Response("ok", { status: 200 });
   }
-
-  // Respond to Sentry immediately; keep working after the response so Sentry
-  // doesn't time out and retry the webhook mid-investigation.
-  after(async () => {
-    try {
-      await runInvestigation(project, error, investigation.id);
-    } catch (err) {
-      console.error(`investigation ${investigation.id} failed`, err);
-    }
-  });
 
   return new Response("ok", { status: 200 });
 }
