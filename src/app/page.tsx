@@ -1,4 +1,5 @@
 import { opsClient, type AppSettingsRow } from "@/lib/supabase-ops";
+import type { ParsedSentryError } from "@/lib/sentry";
 import type { Report } from "@/lib/investigate/tools";
 import { RunButton, DiscardButton, PauseToggle } from "./dashboard-actions";
 
@@ -8,7 +9,13 @@ interface QueuedRow {
   id: string;
   sentry_event_id: string;
   created_at: string;
-  projects: { name: string } | null;
+  sentry_error: ParsedSentryError;
+  projects: { name: string; enabled: boolean } | null;
+}
+
+/** Same project + exception type + message = the same underlying error, just fired again. */
+function duplicateSignature(q: QueuedRow): string {
+  return `${q.projects?.name ?? "?"}::${q.sentry_error.exceptionType ?? ""}::${q.sentry_error.message}`;
 }
 
 interface RecentRow {
@@ -29,9 +36,11 @@ export default async function Home() {
     db.from("app_settings").select("paused").eq("id", 1).single<AppSettingsRow>(),
     db
       .from("investigations")
-      .select("id, sentry_event_id, created_at, projects(name)")
+      .select("id, sentry_event_id, created_at, sentry_error, projects(name, enabled)")
       .eq("status", "queued")
-      .order("created_at", { ascending: true })
+      // Newest first — matches the order the daily cron picks in, and puts
+      // the item that would run automatically right now at the top.
+      .order("created_at", { ascending: false })
       .returns<QueuedRow[]>(),
     db
       .from("investigations")
@@ -43,6 +52,14 @@ export default async function Home() {
   ]);
 
   const paused = settings?.paused ?? false;
+
+  const duplicateCounts = new Map<string, number>();
+  for (const q of queued ?? []) {
+    const key = duplicateSignature(q);
+    duplicateCounts.set(key, (duplicateCounts.get(key) ?? 0) + 1);
+  }
+  // Mirrors runNextAutoInvestigation's own filter (newest first, enabled projects only).
+  const nextAutoId = queued?.find((q) => q.projects?.enabled)?.id;
 
   return (
     <main>
@@ -57,6 +74,7 @@ export default async function Home() {
 
       <section>
         <h2>Queue ({queued?.length ?? 0})</h2>
+        <p>Newest first — ▶ marks the item the daily cron would run right now.</p>
         {!queued || queued.length === 0 ? (
           <p>Nothing queued.</p>
         ) : (
@@ -64,22 +82,35 @@ export default async function Home() {
             <thead>
               <tr>
                 <th>Project</th>
-                <th>Sentry event</th>
+                <th>Error</th>
+                <th>Culprit</th>
                 <th>Queued</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {queued.map((q) => (
-                <tr key={q.id}>
-                  <td>{q.projects?.name ?? "?"}</td>
-                  <td>{q.sentry_event_id}</td>
-                  <td>{new Date(q.created_at).toLocaleString()}</td>
-                  <td>
-                    <RunButton id={q.id} /> <DiscardButton id={q.id} />
-                  </td>
-                </tr>
-              ))}
+              {queued.map((q) => {
+                const count = duplicateCounts.get(duplicateSignature(q)) ?? 1;
+                return (
+                  <tr key={q.id}>
+                    <td>
+                      {q.id === nextAutoId && "▶ "}
+                      {q.projects?.name ?? "?"}
+                      {q.projects && !q.projects.enabled && " (disabled)"}
+                    </td>
+                    <td>
+                      {q.sentry_error.exceptionType ? `${q.sentry_error.exceptionType}: ` : ""}
+                      {q.sentry_error.message}
+                      {count > 1 && <span title="Other queued items with the same project/exception type/message"> ×{count} similar</span>}
+                    </td>
+                    <td>{q.sentry_error.culprit ?? "—"}</td>
+                    <td>{new Date(q.created_at).toLocaleString()}</td>
+                    <td>
+                      <RunButton id={q.id} /> <DiscardButton id={q.id} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

@@ -22,7 +22,7 @@ Sentry (error) --webhook (HMAC signed)--> /api/webhooks/sentry
               +----------------------------------+----------------------------------+
               |                                                                      |
    daily cron, once/day (unless paused):                          dashboard, any time:
-   picks the oldest queued item                                   "Run now" or "Discard"
+   picks the newest queued item                                   "Run now" or "Discard"
    across all enabled projects                                    on any queued item
               |                                                                      |
               +----------------------------------+----------------------------------+
@@ -115,8 +115,12 @@ this app deploys to.
 
 `/` (Basic Auth protected — see step 8 above) shows the queue and lets you act on it:
 
-- **Queue** — everything waiting to be investigated. **Run now** kicks one off in the
-  background; **Discard** drops it without ever investigating it.
+- **Queue** — everything waiting to be investigated, newest first, with the error
+  message/exception type/culprit shown per row and a `▶` marking whichever one the daily
+  cron would pick right now. Rows that share the same project + exception type + message
+  get an "×N similar" badge so repeat errors are obvious instead of scrolling through
+  near-identical rows. **Run now** kicks one off in the background; **Discard** drops it
+  without ever investigating it.
 - **Pause / Resume** — one button. While paused, the daily cron no-ops and "Run now" is
   refused (423). Sentry errors still queue up as normal; they just don't get investigated
   until you resume.
@@ -151,8 +155,9 @@ npm run dev
   switches. If you'd rather pause only the automatic side and keep manual runs available,
   that's a small change in `src/app/api/investigations/[id]/run/route.ts` (drop the
   `isPaused()` check there).
-- **The cron does exactly one item per day**, oldest queued first, no priority/project
-  weighting. Reordering the queue isn't supported — discard-and-let-it-reappear-via-Sentry
+- **The cron does exactly one item per day**, newest queued first (a fresh error beats ones
+  that have been sitting around), no other priority/project weighting. Reordering the queue
+  isn't supported beyond that — discard-and-let-it-reappear-via-Sentry
   is the only way to "skip" one for now.
 - **Dashboard auth is HTTP Basic, not a real login.** Fine for a small team hitting it
   directly; if you want SSO/audit logs instead, Vercel's built-in Deployment Protection is

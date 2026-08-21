@@ -53,7 +53,8 @@ create index if not exists investigations_project_id_idx
   on investigations (project_id);
 create index if not exists investigations_status_idx
   on investigations (status);
--- Queue pop order: oldest queued item first.
+-- Supports the queue's pop order (most recently queued item first — the
+-- daily cron favors freshness over FIFO) as well as the dashboard's list.
 create index if not exists investigations_queued_order_idx
   on investigations (created_at) where status = 'queued';
 

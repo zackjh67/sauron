@@ -59,7 +59,7 @@ export async function claimQueuedInvestigation(investigationId: string): Promise
   return claim(investigationId, "manual");
 }
 
-/** Called by the daily cron: picks the oldest queued item across enabled projects, runs it to completion. Returns the id run, or null if the queue was empty. */
+/** Called by the daily cron: picks the most recently queued item across enabled projects (not FIFO — a fresh error outranks ones that have been sitting around), runs it to completion. Returns the id run, or null if the queue was empty. */
 export async function runNextAutoInvestigation(): Promise<string | null> {
   const db = opsClient();
 
@@ -68,7 +68,7 @@ export async function runNextAutoInvestigation(): Promise<string | null> {
     .select("id, projects!inner(enabled)")
     .eq("status", "queued")
     .eq("projects.enabled", true)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<{ id: string }>();
 
