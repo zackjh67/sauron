@@ -90,7 +90,8 @@ Projects can live under different Vercel accounts and different Supabase orgs (G
 assumed to be one account/org for everything). Nothing is hardcoded to a single account: each
 row in the `projects` table names *which* env var holds the right token
 (`vercel_token_ref`, `supabase_management_token_ref`, default `..._DEFAULT`). Onboarding a
-project under a new account means adding a new env var (e.g. `VERCEL_TOKEN_CLIENTX`) and
+project under a new account means adding a new env var (e.g. `VC_TOKEN_CLIENTX` — not
+`VERCEL_TOKEN_CLIENTX`; Vercel rejects custom env vars starting with `VERCEL_`) and
 pointing that project's row at it — no code change.
 
 ## One-time manual setup
@@ -103,7 +104,7 @@ These happen in dashboards, not in this repo:
 | 2 | Seed the `projects` table — one row per product app (Sentry slug, GitHub repo, Vercel project id, Supabase project ref, token refs) | — |
 | 3 | Register a **GitHub App** (Contents: read, Pull requests: write, Metadata: read), install it on every repo in the registry | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` |
 | 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Issue" resource enabled; also grab an API token | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
-| 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs` (needs a plan that supports Log Drains) | `VERCEL_LOG_DRAIN_SECRET` |
+| 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs` (needs a plan that supports Log Drains) | `LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
 | 8 | Pick a dashboard password. `vercel.json` already schedules the daily cron (08:00 UTC — edit the cron expression to taste) | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |

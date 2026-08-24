@@ -8,8 +8,8 @@ import { opsClient } from "@/lib/supabase-ops";
  * the drain — this wasn't checked against a live payload while building.
  */
 function verifyVercelSignature(rawBody: string, signatureHeader: string | null): boolean {
-  const secret = process.env.VERCEL_LOG_DRAIN_SECRET;
-  if (!secret) throw new Error("VERCEL_LOG_DRAIN_SECRET not set");
+  const secret = process.env.LOG_DRAIN_SECRET;
+  if (!secret) throw new Error("LOG_DRAIN_SECRET not set");
   if (!signatureHeader) return false;
 
   const expected = createHmac("sha1", secret).update(rawBody, "utf8").digest("hex");

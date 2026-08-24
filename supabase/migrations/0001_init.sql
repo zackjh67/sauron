@@ -10,10 +10,12 @@ create table if not exists projects (
 
   vercel_project_id text not null,
   vercel_team_id text,                -- nullable: only needed if the project lives under a Vercel team scope
-  vercel_token_ref text not null default 'VERCEL_TOKEN_DEFAULT',
+  vercel_token_ref text not null default 'VC_TOKEN_DEFAULT',
     -- name of the env var holding the Vercel API token that can see this project.
     -- Projects may span multiple Vercel accounts, so this is a *reference*,
-    -- not the token itself. Add more env vars (VERCEL_TOKEN_<ACCOUNT>) as needed.
+    -- not the token itself. Add more env vars (VC_TOKEN_<ACCOUNT>) as needed.
+    -- Named VC_ not VERCEL_ because Vercel rejects custom env vars starting
+    -- with VERCEL_ (reserved for its own system variables).
 
   supabase_project_ref text not null,
   supabase_management_token_ref text not null default 'SUPABASE_MANAGEMENT_TOKEN_DEFAULT',
