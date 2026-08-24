@@ -81,7 +81,7 @@ src/
       run.ts                          the agentic Tool Runner loop
       pr.ts                           turns a report into a draft PR
       orchestrate.ts                  wires investigate -> PR -> Slack -> DB
-supabase/migrations/0001_init.sql      registry + investigation queue + settings + ingested logs schema
+supabase/migrations/                   registry + investigation queue + settings + ingested logs schema, RLS lockdown
 ```
 
 ## Multiple accounts and orgs
@@ -100,7 +100,7 @@ These happen in dashboards, not in this repo:
 
 | # | What | Where it lands |
 |---|------|-----------------|
-| 1 | Create a **dedicated ops Supabase project** (not one of the products it monitors), run `supabase/migrations/0001_init.sql` against it | `SUPABASE_OPS_URL`, `SUPABASE_OPS_SERVICE_ROLE_KEY` |
+| 1 | Create a **dedicated ops Supabase project** (not one of the products it monitors), run every file in `supabase/migrations/` against it, in order, via the SQL editor | `SUPABASE_OPS_URL`, `SUPABASE_OPS_SERVICE_ROLE_KEY` |
 | 2 | Seed the `projects` table — one row per product app (Sentry slug, GitHub repo, Vercel project id, Supabase project ref, token refs) | — |
 | 3 | Register a **GitHub App** (Contents: read, Pull requests: write, Metadata: read), install it on every repo in the registry | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` |
 | 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Issue" resource enabled; also grab an API token | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
@@ -163,3 +163,8 @@ npm run dev
 - **Dashboard auth is HTTP Basic, not a real login.** Fine for a small team hitting it
   directly; if you want SSO/audit logs instead, Vercel's built-in Deployment Protection is
   the lower-effort upgrade over building auth into the app.
+- **RLS is enabled with zero policies** (`0002_enable_rls.sql`) rather than written per-table
+  policies — this app only ever talks to the ops project via `SUPABASE_OPS_SERVICE_ROLE_KEY`,
+  which bypasses RLS entirely, so a default-deny for `anon`/`authenticated` is all that's
+  needed. If you ever add a client-side/browser consumer of this data, it'll need real
+  policies, not this.
