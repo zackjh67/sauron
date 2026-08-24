@@ -50,6 +50,10 @@ lets you run or discard anything else in the queue on your own schedule. A singl
 toggle on that dashboard stops both the cron and any "Run now" clicks — the queue keeps
 filling while paused, nothing just gets silently investigated in the background.
 
+Slack gets pinged on three occasions: an investigation finishes (with its report), an
+investigation fails (with the error — flagged as a likely credential problem when it looks
+like one), or a tracked credential is approaching/past its expiry date.
+
 ## Why it exists
 
 Manually triaging a Sentry alert usually means three tabs: GitHub for the code, Vercel for
@@ -66,6 +70,7 @@ src/
     api/webhooks/sentry/route.ts       Sentry webhook receiver -> enqueues
     api/ingest/vercel-logs/route.ts    Vercel Log Drain receiver
     api/cron/daily-investigation/      once/day queue pop (Vercel Cron, CRON_SECRET-gated)
+    api/cron/check-credentials/        once/day expiry check -> Slack (same gating)
     api/investigations/[id]/run/       dashboard "run now"
     api/investigations/[id]/discard/   dashboard "discard"
     api/settings/pause/                dashboard pause/resume toggle
@@ -73,8 +78,10 @@ src/
     sentry.ts, sentry-api.ts           webhook verification + Sentry API
     github.ts                          GitHub App auth, file reads, draft PRs
     vercel-logs.ts, supabase-logs.ts   log query helpers
-    slack.ts                          report notifications
+    slack.ts                          report/failure/credential-expiry notifications
     secrets.ts                         per-account credential resolution
+    credential-expirations.ts          reads credential_expirations, flags what's due
+    cron-auth.ts                       shared CRON_SECRET check for both cron routes
     investigate/
       queue.ts                        claim/run/discard queue items, pause flag
       tools.ts                        the tools Claude gets during investigation
@@ -107,10 +114,26 @@ These happen in dashboards, not in this repo:
 | 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs` (needs a plan that supports Log Drains) | `LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
-| 8 | Pick a dashboard password. `vercel.json` already schedules the daily cron (08:00 UTC — edit the cron expression to taste) | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
+| 8 | Pick a dashboard password. `vercel.json` already schedules both crons (08:00/09:00 UTC — edit the cron expressions to taste; a Hobby plan caps you at 2 daily crons total, which is exactly what this uses) | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
+| 9 | For any credential with a known expiry (e.g. the Supabase management token, ~1 year) insert a row so you get a Slack warning as it approaches — see below | — |
 
 Copy `.env.example` to `.env.local` for local dev; set the same vars on the Vercel project
 this app deploys to.
+
+### Tracking credential expiry
+
+Supabase (and possibly others) don't expose a token's remaining lifetime through their API, so
+this can't be auto-detected — instead, record the expiry date yourself once and a daily cron
+(`/api/cron/check-credentials`) Slack-alerts starting 14 days out, and daily past expiry until
+you update it:
+
+```sql
+insert into credential_expirations (name, expires_at, notes) values
+  ('SUPABASE_MANAGEMENT_TOKEN_DEFAULT', '2027-08-24T00:00:00Z', 'Supabase personal access token');
+```
+
+Use whatever expiry date Supabase showed you when you created the token. Add one row per
+credential worth tracking this way — nothing else about the table is Supabase-specific.
 
 ## The dashboard
 

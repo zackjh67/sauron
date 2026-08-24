@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/daily-investigation",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/check-credentials",
+      "schedule": "0 9 * * *"
     }
   ]
 }

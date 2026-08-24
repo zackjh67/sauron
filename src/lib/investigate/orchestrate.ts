@@ -2,7 +2,7 @@ import { opsClient, type ProjectRow } from "../supabase-ops";
 import type { ParsedSentryError } from "../sentry";
 import { investigate } from "./run";
 import { openPrForReport } from "./pr";
-import { postSlackReport } from "../slack";
+import { postSlackReport, postInvestigationFailure } from "../slack";
 
 /**
  * Runs one full investigation: agentic Claude loop -> draft PR (if a fix was
@@ -35,6 +35,14 @@ export async function runInvestigation(project: ProjectRow, error: ParsedSentryE
       .from("investigations")
       .update({ status: "failed", error: message, completed_at: new Date().toISOString() })
       .eq("id", investigationId);
+
+    // Best-effort — a broken Slack webhook shouldn't hide the original failure.
+    try {
+      await postInvestigationFailure({ projectName: project.name, investigationId, errorMessage: message });
+    } catch (slackErr) {
+      console.error(`failed to post failure alert for investigation ${investigationId}`, slackErr);
+    }
+
     throw err;
   }
 }

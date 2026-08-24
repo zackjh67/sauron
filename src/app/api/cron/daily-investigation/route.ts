@@ -1,18 +1,10 @@
 import { isPaused, runNextAutoInvestigation } from "@/lib/investigate/queue";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 // Investigations involve several rounds of tool calls (GitHub + logs + a
 // reasoning model) — the default route timeout is nowhere near enough.
 // Requires a Vercel plan whose function duration limit covers this.
 export const maxDuration = 300;
-
-// Vercel Cron sends "Authorization: Bearer $CRON_SECRET" when CRON_SECRET is
-// set — this is Vercel's documented way to keep a cron route from being
-// callable by anyone who finds the URL.
-function isAuthorizedCronRequest(req: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  return req.headers.get("authorization") === `Bearer ${secret}`;
-}
 
 export async function GET(req: Request) {
   if (!isAuthorizedCronRequest(req)) {
