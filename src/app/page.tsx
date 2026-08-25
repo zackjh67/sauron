@@ -68,8 +68,8 @@ export default async function Home() {
 
       <section>
         <p>
-          Status: <strong>{paused ? "Paused" : "Running"}</strong> — one automatic investigation/day, plus
-          whatever you run below. <PauseToggle paused={paused} />
+          Status: <strong className={paused ? "status-paused" : "status-running"}>{paused ? "Paused" : "Running"}</strong> —
+          one automatic investigation/day, plus whatever you run below. <PauseToggle paused={paused} />
         </p>
         <p>
           <Link href="/projects">Manage projects &rarr;</Link>
@@ -78,7 +78,7 @@ export default async function Home() {
 
       <section>
         <h2>Queue ({queued?.length ?? 0})</h2>
-        <p>Newest first — ▶ marks the item the daily cron would run right now.</p>
+        <p className="muted">Newest first — ▶ marks the item the daily cron would run right now.</p>
         {!queued || queued.length === 0 ? (
           <p>Nothing queued.</p>
         ) : (
@@ -100,12 +100,19 @@ export default async function Home() {
                     <td>
                       {q.id === nextAutoId && "▶ "}
                       {q.projects?.name ?? "?"}
-                      {q.projects && !q.projects.enabled && " (disabled)"}
+                      {q.projects && !q.projects.enabled && <span className="badge"> disabled</span>}
                     </td>
                     <td>
                       {q.sentry_error.exceptionType ? `${q.sentry_error.exceptionType}: ` : ""}
                       {q.sentry_error.message}
-                      {count > 1 && <span title="Other queued items with the same project/exception type/message"> ×{count} similar</span>}
+                      {count > 1 && (
+                        <>
+                          {" "}
+                          <span className="badge" title="Other queued items with the same project/exception type/message">
+                            ×{count} similar
+                          </span>
+                        </>
+                      )}
                     </td>
                     <td>{q.sentry_error.culprit ?? "—"}</td>
                     <td>{new Date(q.created_at).toLocaleString()}</td>

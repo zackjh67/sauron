@@ -26,19 +26,23 @@ export default async function EditProjectPage({
         <Link href="/projects">&larr; Back to projects</Link>
       </p>
       <h1>Edit {project.name}</h1>
-      {error && <p role="alert">{error}</p>}
-      <ProjectForm action={updateProject.bind(null, id)} initial={project} />
+      <section>
+        {error && <p role="alert">{error}</p>}
+        <ProjectForm action={updateProject.bind(null, id)} initial={project} />
 
-      <hr />
-      <form action={deleteProject.bind(null, id)}>
-        <button type="submit">Delete project</button>
-      </form>
-      <p>
-        <small>
-          Deleting fails if this project has any investigation history — disable it above
-          instead if you just want to stop new investigations without losing that history.
-        </small>
-      </p>
+        <hr />
+        <form action={deleteProject.bind(null, id)}>
+          <button type="submit" className="danger">
+            Delete project
+          </button>
+        </form>
+        <p>
+          <small>
+            Deleting fails if this project has any investigation history — disable it above
+            instead if you just want to stop new investigations without losing that history.
+          </small>
+        </p>
+      </section>
     </main>
   );
 }

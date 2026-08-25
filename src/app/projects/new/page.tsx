@@ -11,8 +11,10 @@ export default async function NewProjectPage({ searchParams }: { searchParams: P
         <Link href="/projects">&larr; Back to projects</Link>
       </p>
       <h1>New project</h1>
-      {error && <p role="alert">{error}</p>}
-      <ProjectForm action={createProject} />
+      <section>
+        {error && <p role="alert">{error}</p>}
+        <ProjectForm action={createProject} />
+      </section>
     </main>
   );
 }

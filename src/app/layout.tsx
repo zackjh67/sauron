@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "Sauron",
   description: "Sentry error auto-investigator",

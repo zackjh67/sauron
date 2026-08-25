@@ -27,10 +27,10 @@ export function RunButton({ id }: { id: string }) {
   const { run, pending, error } = useApiAction();
   return (
     <span>
-      <button disabled={pending} onClick={() => run(`/api/investigations/${id}/run`, { method: "POST" })}>
+      <button className="primary" disabled={pending} onClick={() => run(`/api/investigations/${id}/run`, { method: "POST" })}>
         {pending ? "Starting…" : "Run now"}
       </button>
-      {error && <span className="error"> {error}</span>}
+      {error && <span role="alert"> {error}</span>}
     </span>
   );
 }
@@ -39,10 +39,10 @@ export function DiscardButton({ id }: { id: string }) {
   const { run, pending, error } = useApiAction();
   return (
     <span>
-      <button disabled={pending} onClick={() => run(`/api/investigations/${id}/discard`, { method: "POST" })}>
+      <button className="danger" disabled={pending} onClick={() => run(`/api/investigations/${id}/discard`, { method: "POST" })}>
         {pending ? "…" : "Discard"}
       </button>
-      {error && <span className="error"> {error}</span>}
+      {error && <span role="alert"> {error}</span>}
     </span>
   );
 }
@@ -52,6 +52,7 @@ export function PauseToggle({ paused }: { paused: boolean }) {
   return (
     <span>
       <button
+        className={paused ? "primary" : "danger"}
         disabled={pending}
         onClick={() =>
           run("/api/settings/pause", {
@@ -63,7 +64,7 @@ export function PauseToggle({ paused }: { paused: boolean }) {
       >
         {pending ? "…" : paused ? "Resume" : "Pause"}
       </button>
-      {error && <span className="error"> {error}</span>}
+      {error && <span role="alert"> {error}</span>}
     </span>
   );
 }

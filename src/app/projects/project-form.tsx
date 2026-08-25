@@ -91,7 +91,9 @@ export function ProjectForm({
       </fieldset>
 
       <p>
-        <button type="submit">{initial ? "Save changes" : "Create project"}</button>
+        <button type="submit" className="primary">
+          {initial ? "Save changes" : "Create project"}
+        </button>
       </p>
     </form>
   );
