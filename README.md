@@ -130,7 +130,7 @@ These happen in dashboards, not in this repo:
 | 2 | Add a project in the `/projects` GUI (once deployed) — one row per product app (Sentry slug, GitHub repo, Vercel project id, Supabase project ref, token refs) | — |
 | 3 | Register a **GitHub App** (Contents: read, Pull requests: write, Metadata: read), install it on every repo in the registry | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` |
 | 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Error" resource enabled — not "Issue", see below; also grab an API token | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
-| 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs` (needs a plan that supports Log Drains) | `LOG_DRAIN_SECRET` |
+| 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs`, with a Custom Header `x-log-drain-secret` set to the same value (needs a plan that supports Log Drains) | `LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
 | 8 | Pick a dashboard password. `vercel.json` already schedules both crons (08:00/09:00 UTC — edit the cron expressions to taste; a Hobby plan caps you at 2 daily crons total, which is exactly what this uses) | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
@@ -212,10 +212,12 @@ npm run dev
   directly. A full-file replacement is more robust than trying to apply an LLM-authored patch,
   but it means one file per fix for now; a report that needs multi-file changes still gets
   filed (report + Slack post), just without a PR.
-- **Sentry webhook and Vercel Log Drain payload shapes are written from documented formats,
-  not verified against a live payload yet.** Log the raw body on the first real event and
-  confirm field paths (`src/lib/sentry.ts`, `src/app/api/ingest/vercel-logs/route.ts`) before
-  trusting them fully.
+- **Sentry webhook payload shape, and the Vercel Log Drain's log entry JSON shape
+  (`timestamp`/`level`/`message`/`requestId`/`projectId`), are written from documented formats,
+  not verified against a live payload yet** (auth for the log drain *was* wrong and got fixed —
+  see the git history around `x-log-drain-secret` — but the body shape is still unconfirmed).
+  Log the raw body on the first real delivery and confirm field paths (`src/lib/sentry.ts`,
+  `src/app/api/ingest/vercel-logs/route.ts`) before trusting them fully.
 - **`vercel_logs` grows unbounded** from the drain. The migration has a commented-out prune
   query — schedule it (pg_cron, or an external cron hitting a small maintenance route) once
   the drain is live.
