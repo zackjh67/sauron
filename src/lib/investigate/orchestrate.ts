@@ -1,6 +1,6 @@
 import { opsClient, type ProjectRow } from "../supabase-ops";
 import type { ParsedSentryError } from "../sentry";
-import { investigate } from "./run";
+import { investigate, type InvestigateOptions } from "./run";
 import { openPrForReport } from "./pr";
 import { postSlackReport, postInvestigationFailure } from "../slack";
 
@@ -9,11 +9,16 @@ import { postSlackReport, postInvestigationFailure } from "../slack";
  * proposed) -> Slack notification -> investigation row updated throughout so
  * a crash mid-flight leaves a visible "running"/"failed" row, not silence.
  */
-export async function runInvestigation(project: ProjectRow, error: ParsedSentryError, investigationId: string) {
+export async function runInvestigation(
+  project: ProjectRow,
+  error: ParsedSentryError,
+  investigationId: string,
+  options: InvestigateOptions = {},
+) {
   const db = opsClient();
 
   try {
-    const report = await investigate(project, error);
+    const report = await investigate(project, error, options);
     const prUrl = await openPrForReport(project, error, report);
 
     await db

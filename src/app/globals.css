@@ -157,6 +157,22 @@ label input {
   margin-top: 0.3rem;
 }
 
+select {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.run-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
 fieldset {
   border: 1px dashed var(--border);
   border-radius: var(--radius);

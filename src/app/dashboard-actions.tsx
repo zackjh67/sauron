@@ -3,6 +3,13 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
+const DEFAULT_MODEL = "claude-sonnet-5";
+const MODELS = [
+  { value: DEFAULT_MODEL, label: "Sonnet 5 (default)" },
+  { value: "claude-opus-5", label: "Opus 5" },
+];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
 function useApiAction() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -23,16 +30,52 @@ function useApiAction() {
   return { run, pending, error };
 }
 
-export function RunButton({ id }: { id: string }) {
+/** Shared by RunButton and RerunButton — a model/effort pair plus a submit button. */
+function ModelEffortControls({ endpoint, label }: { endpoint: string; label: string }) {
   const { run, pending, error } = useApiAction();
+  const [model, setModel] = useState(DEFAULT_MODEL);
+  const [effort, setEffort] = useState("medium");
+
   return (
-    <span>
-      <button className="primary" disabled={pending} onClick={() => run(`/api/investigations/${id}/run`, { method: "POST" })}>
-        {pending ? "Starting…" : "Run now"}
+    <span className="run-controls">
+      <select value={model} onChange={(e) => setModel(e.target.value)} disabled={pending} aria-label="Model">
+        {MODELS.map((m) => (
+          <option key={m.value} value={m.value}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+      <select value={effort} onChange={(e) => setEffort(e.target.value)} disabled={pending} aria-label="Effort">
+        {EFFORTS.map((e) => (
+          <option key={e} value={e}>
+            {e}
+          </option>
+        ))}
+      </select>
+      <button
+        className="primary"
+        disabled={pending}
+        onClick={() =>
+          run(endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ model, effort }),
+          })
+        }
+      >
+        {pending ? "Starting…" : label}
       </button>
       {error && <span role="alert"> {error}</span>}
     </span>
   );
+}
+
+export function RunButton({ id }: { id: string }) {
+  return <ModelEffortControls endpoint={`/api/investigations/${id}/run`} label="Run now" />;
+}
+
+export function RerunButton({ id }: { id: string }) {
+  return <ModelEffortControls endpoint={`/api/investigations/${id}/rerun`} label="Re-run" />;
 }
 
 export function DiscardButton({ id }: { id: string }) {

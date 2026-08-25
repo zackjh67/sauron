@@ -27,7 +27,7 @@ Sentry (error) --webhook (HMAC signed)--> /api/webhooks/sentry
               |                                                                      |
               +----------------------------------+----------------------------------+
                                                  |
-                              Claude (Opus 5, agentic tool use), investigates:
+                              Claude (Sonnet 5/medium effort by default, agentic tool use), investigates:
                                 - read_github_file / list_github_dir
                                 - query_vercel_logs / query_supabase_logs
                                 - get_sentry_issue_events
@@ -86,7 +86,8 @@ src/
     api/ingest/vercel-logs/route.ts    Vercel Log Drain receiver
     api/cron/daily-investigation/      once/day queue pop (Vercel Cron, CRON_SECRET-gated)
     api/cron/check-credentials/        once/day expiry check -> Slack (same gating)
-    api/investigations/[id]/run/       dashboard "run now"
+    api/investigations/[id]/run/       dashboard "run now" (accepts {model, effort})
+    api/investigations/[id]/rerun/     dashboard "re-run" — clones then runs (accepts {model, effort})
     api/investigations/[id]/discard/   dashboard "discard"
     api/settings/pause/                dashboard pause/resume toggle
   lib/
@@ -100,7 +101,8 @@ src/
     credential-expirations.ts          reads credential_expirations, flags what's due
     cron-auth.ts                       shared CRON_SECRET check for both cron routes
     investigate/
-      queue.ts                        claim/run/discard queue items, pause flag
+      queue.ts                        claim/run/discard/clone queue items, pause flag
+      model-options.ts                 selectable models/effort levels + defaults (Sonnet 5/medium)
       tools.ts                        the tools Claude gets during investigation
       run.ts                          the agentic Tool Runner loop
       pr.ts                           turns a report into a draft PR
@@ -207,13 +209,17 @@ credential worth tracking this way — nothing else about the table is Supabase-
   message/exception type/culprit shown per row and a `▶` marking whichever one the daily
   cron would pick right now. Rows that share the same project + exception type + message
   get an "×N similar" badge so repeat errors are obvious instead of scrolling through
-  near-identical rows. **Run now** kicks one off in the background; **Discard** drops it
-  without ever investigating it.
-- **Pause / Resume** — one button. While paused, the daily cron no-ops and "Run now" is
-  refused (423). Sentry errors still queue up as normal; they just don't get investigated
-  until you resume.
-- **Recent** — the last 20 completed/failed/discarded investigations, with a link to the
-  draft PR when one was opened.
+  near-identical rows. **Run now** picks a model (Sonnet 5 or Opus 5) and effort
+  (low/medium/high/xhigh/max) right there before kicking it off in the background —
+  defaults to Sonnet 5/medium, the cheaper combination; **Discard** drops it without ever
+  investigating it.
+- **Pause / Resume** — one button. While paused, the daily cron no-ops and both "Run now"
+  and "Re-run" are refused (423). Sentry errors still queue up as normal; they just don't
+  get investigated until you resume.
+- **Recent** — the last 20 completed/failed/discarded investigations, showing which
+  model/effort each one actually ran with, with a link to the draft PR when one was opened.
+  **Re-run** (same model/effort picker) clones it into a fresh queued row and runs that —
+  the original's report/PR/error stays untouched, so re-running never overwrites history.
 
 `/errors` is the full history, any status, not just the queue/last-20 — filterable by
 project and searchable by message/culprit, paginated 50 at a time. Click through to
@@ -227,6 +233,24 @@ do anything until something wires them up, and the form says so rather than pret
 otherwise. Deleting a project fails if it has any investigation history (a foreign key stops
 it) — disable it instead if you just want to stop new investigations without losing that
 history.
+
+## Model and cost
+
+Default is Sonnet 5 at `effort: "medium"` — meaningfully cheaper than Opus 5/high without
+losing much for most bugs. Applies everywhere a model isn't explicitly chosen: the daily
+cron always uses this default (no override UI there, it's unattended), and it's what "Run
+now"/"Re-run" pre-select if you don't change the dropdowns.
+
+Only Sonnet 5 and Opus 5 are selectable — not Haiku 4.5. That's not just a quality call:
+Haiku 4.5 doesn't accept the `output_config.effort` parameter at all (a different request
+shape), and this is exactly the kind of task — root-causing a bug and proposing a code
+change you might merge — where a weaker model confidently wrong is worse than not running
+it. `src/lib/investigate/model-options.ts` is where the selectable list lives if you want to
+change that trade-off.
+
+Every investigation's `investigations` row records which model/effort it actually ran with
+(migration `0005_investigation_run_options.sql`), visible in the Recent table — useful for
+correlating a given run against what it cost in the Anthropic Console.
 
 ## Local dev
 

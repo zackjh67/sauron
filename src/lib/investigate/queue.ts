@@ -1,6 +1,8 @@
 import { opsClient, type AppSettingsRow, type InvestigationRow, type ProjectRow } from "../supabase-ops";
 import type { ParsedSentryError } from "../sentry";
 import { runInvestigation } from "./orchestrate";
+import type { InvestigateOptions } from "./run";
+import { DEFAULT_MODEL, DEFAULT_EFFORT } from "./model-options";
 
 export async function isPaused(): Promise<boolean> {
   const db = opsClient();
@@ -25,17 +27,24 @@ export interface ClaimedInvestigation {
 }
 
 /**
- * Atomically claims one queued investigation (queued -> running). The
- * conditional `.eq("status", "queued")` on the update is what makes this
- * safe under concurrent callers (cron + a dashboard click racing) — only
- * one caller's update actually matches a row, everyone else gets null back.
+ * Atomically claims one queued investigation (queued -> running), recording
+ * which model/effort it's about to run with. The conditional
+ * `.eq("status", "queued")` on the update is what makes this safe under
+ * concurrent callers (cron + a dashboard click racing) — only one caller's
+ * update actually matches a row, everyone else gets null back.
  */
-async function claim(investigationId: string, trigger: "auto" | "manual"): Promise<ClaimedInvestigation | null> {
+async function claim(
+  investigationId: string,
+  trigger: "auto" | "manual",
+  options: InvestigateOptions = {},
+): Promise<ClaimedInvestigation | null> {
   const db = opsClient();
+  const model = options.model ?? DEFAULT_MODEL;
+  const effort = options.effort ?? DEFAULT_EFFORT;
 
   const { data: claimed, error: claimError } = await db
     .from("investigations")
-    .update({ status: "running", run_trigger: trigger, started_at: new Date().toISOString() })
+    .update({ status: "running", run_trigger: trigger, model, effort, started_at: new Date().toISOString() })
     .eq("id", investigationId)
     .eq("status", "queued")
     .select("id, project_id, sentry_error")
@@ -54,12 +63,15 @@ async function claim(investigationId: string, trigger: "auto" | "manual"): Promi
   return { id: claimed.id, project, error: claimed.sentry_error as ParsedSentryError };
 }
 
-/** For the dashboard's "run now" — caller decides whether to check `isPaused()` first, and how to run it (foreground/background). */
-export async function claimQueuedInvestigation(investigationId: string): Promise<ClaimedInvestigation | null> {
-  return claim(investigationId, "manual");
+/** For the dashboard's "run now"/"re-run" — caller decides whether to check `isPaused()` first, and how to run it (foreground/background). */
+export async function claimQueuedInvestigation(
+  investigationId: string,
+  options: InvestigateOptions = {},
+): Promise<ClaimedInvestigation | null> {
+  return claim(investigationId, "manual", options);
 }
 
-/** Called by the daily cron: picks the most recently queued item across enabled projects (not FIFO — a fresh error outranks ones that have been sitting around), runs it to completion. Returns the id run, or null if the queue was empty. */
+/** Called by the daily cron: picks the most recently queued item across enabled projects (not FIFO — a fresh error outranks ones that have been sitting around), runs it to completion with the default model/effort. Returns the id run, or null if the queue was empty. */
 export async function runNextAutoInvestigation(): Promise<string | null> {
   const db = opsClient();
 
@@ -93,4 +105,37 @@ export async function discardInvestigation(investigationId: string): Promise<boo
     .maybeSingle();
   if (error) throw new Error(`failed to discard investigation ${investigationId}: ${error.message}`);
   return data !== null;
+}
+
+/**
+ * Re-run support: rather than resetting the original row (which would erase
+ * its report/PR history), clone it into a fresh queued row with the same
+ * project + Sentry error, leaving the original untouched. Caller then claims
+ * the returned id like any other queued item.
+ */
+export async function cloneAsQueued(sourceId: string): Promise<string | null> {
+  const db = opsClient();
+
+  const { data: source, error } = await db
+    .from("investigations")
+    .select("project_id, sentry_event_id, sentry_error")
+    .eq("id", sourceId)
+    .maybeSingle<Pick<InvestigationRow, "project_id" | "sentry_event_id" | "sentry_error">>();
+  if (error) throw new Error(`failed to load investigation ${sourceId}: ${error.message}`);
+  if (!source) return null;
+
+  const { data: inserted, error: insertError } = await db
+    .from("investigations")
+    .insert({
+      project_id: source.project_id,
+      sentry_event_id: source.sentry_event_id,
+      sentry_error: source.sentry_error,
+      status: "queued",
+    })
+    .select("id")
+    .single<{ id: string }>();
+  if (insertError || !inserted) {
+    throw new Error(`failed to clone investigation ${sourceId}: ${insertError?.message}`);
+  }
+  return inserted.id;
 }

@@ -3,7 +3,7 @@ import { opsClient, type AppSettingsRow } from "@/lib/supabase-ops";
 import type { ParsedSentryError } from "@/lib/sentry";
 import type { Report } from "@/lib/investigate/tools";
 import { errorSignature } from "@/lib/error-signature";
-import { RunButton, DiscardButton, PauseToggle } from "./dashboard-actions";
+import { RunButton, RerunButton, DiscardButton, PauseToggle } from "./dashboard-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,8 @@ interface RecentRow {
   id: string;
   status: string;
   run_trigger: string | null;
+  model: string | null;
+  effort: string | null;
   report: Report | null;
   pr_url: string | null;
   error: string | null;
@@ -41,7 +43,7 @@ export default async function Home() {
       .returns<QueuedRow[]>(),
     db
       .from("investigations")
-      .select("id, status, run_trigger, report, pr_url, error, completed_at, projects(name)")
+      .select("id, status, run_trigger, model, effort, report, pr_url, error, completed_at, projects(name)")
       .neq("status", "queued")
       .order("created_at", { ascending: false })
       .limit(20)
@@ -135,9 +137,11 @@ export default async function Home() {
                 <th>Project</th>
                 <th>Status</th>
                 <th>Trigger</th>
+                <th>Model / effort</th>
                 <th>Summary / error</th>
                 <th>PR</th>
                 <th>Completed</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -146,9 +150,13 @@ export default async function Home() {
                   <td>{r.projects?.name ?? "?"}</td>
                   <td>{r.status}</td>
                   <td>{r.run_trigger ?? "—"}</td>
+                  <td>{r.model ? `${r.model} / ${r.effort}` : "—"}</td>
                   <td>{r.status === "failed" ? r.error : (r.report?.summary ?? "—")}</td>
                   <td>{r.pr_url ? <a href={r.pr_url}>PR</a> : "—"}</td>
                   <td>{r.completed_at ? new Date(r.completed_at).toLocaleString() : "—"}</td>
+                  <td>
+                    <RerunButton id={r.id} />
+                  </td>
                 </tr>
               ))}
             </tbody>

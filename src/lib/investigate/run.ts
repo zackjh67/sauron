@@ -2,8 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { ParsedSentryError } from "../sentry";
 import type { ProjectRow } from "../supabase-ops";
 import { buildInvestigationTools, type Report } from "./tools";
+import { DEFAULT_MODEL, DEFAULT_EFFORT, type SelectableModel, type EffortLevel } from "./model-options";
 
 const client = new Anthropic();
+
+export interface InvestigateOptions {
+  model?: SelectableModel;
+  effort?: EffortLevel;
+}
 
 const SYSTEM_PROMPT = `You are investigating a production error reported by Sentry, for a codebase
 hosted on GitHub. Depending on the project, it may run as Next.js functions on Vercel, as
@@ -22,7 +28,14 @@ identify a safe, well-scoped fix, still submit a report — set proposed_fix to 
 why in risk_notes rather than proposing something you're not confident in. Keep any proposed fix
 minimal and scoped to the actual bug; don't refactor unrelated code.`;
 
-export async function investigate(project: ProjectRow, error: ParsedSentryError): Promise<Report> {
+export async function investigate(
+  project: ProjectRow,
+  error: ParsedSentryError,
+  options: InvestigateOptions = {},
+): Promise<Report> {
+  const model = options.model ?? DEFAULT_MODEL;
+  const effort = options.effort ?? DEFAULT_EFFORT;
+
   let capturedReport: Report | null = null;
   const tools = buildInvestigationTools(project, (r) => {
     capturedReport = r;
@@ -54,10 +67,10 @@ export async function investigate(project: ProjectRow, error: ParsedSentryError)
   ].join("\n");
 
   const runner = client.beta.messages.toolRunner({
-    model: "claude-opus-5",
+    model,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
-    output_config: { effort: "high" },
+    output_config: { effort },
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools,
     messages: [{ role: "user", content: userPrompt }],

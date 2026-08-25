@@ -1,12 +1,15 @@
 import { after } from "next/server";
-import { claimQueuedInvestigation, isPaused } from "@/lib/investigate/queue";
+import { claimQueuedInvestigation, cloneAsQueued, isPaused } from "@/lib/investigate/queue";
 import { runInvestigation } from "@/lib/investigate/orchestrate";
 import { parseModel, parseEffort } from "@/lib/investigate/model-options";
 
-// The after() callback below still counts toward this function's execution
-// time on Vercel, even though the HTTP response returns early.
 export const maxDuration = 300;
 
+/**
+ * Re-runs a previously completed/failed/discarded investigation. Clones it
+ * into a fresh queued row rather than resetting the original in place, so
+ * the original's report/PR/error history isn't overwritten.
+ */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -17,14 +20,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const body = await req.json().catch(() => ({}) as Record<string, unknown>);
   const options = { model: parseModel(body.model), effort: parseEffort(body.effort) };
 
-  const claimed = await claimQueuedInvestigation(id, options);
-  if (!claimed) {
-    return new Response("not currently queued (already run or discarded)", { status: 409 });
+  const newId = await cloneAsQueued(id);
+  if (!newId) {
+    return new Response("original investigation not found", { status: 404 });
   }
 
-  // Respond immediately so the dashboard button doesn't hang for however
-  // long the investigation takes; it finishes in the background and the
-  // dashboard picks up the new status on its next refresh.
+  const claimed = await claimQueuedInvestigation(newId, options);
+  if (!claimed) {
+    // Shouldn't happen — nothing else could have claimed a row we just created.
+    return new Response("internal error: clone was not queued", { status: 500 });
+  }
+
   after(async () => {
     try {
       await runInvestigation(claimed.project, claimed.error, claimed.id, options);
@@ -33,5 +39,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   });
 
-  return new Response("started", { status: 202 });
+  return new Response(JSON.stringify({ id: newId }), {
+    status: 202,
+    headers: { "content-type": "application/json" },
+  });
 }
