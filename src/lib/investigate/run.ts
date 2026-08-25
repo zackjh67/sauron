@@ -31,6 +31,12 @@ export async function investigate(project: ProjectRow, error: ParsedSentryError)
   const userPrompt = [
     `Sentry event: ${error.eventId}`,
     `Project: ${project.name} (repo ${project.github_repo})`,
+    ...(project.github_repo_subdir
+      ? [
+          `This project's code lives under "${project.github_repo_subdir}/" within that repo — ` +
+            `other paths may exist for unrelated apps sharing the same monorepo, don't assume they're relevant.`,
+        ]
+      : []),
     `Environment: ${error.environment ?? "unknown"}`,
     `Release / commit: ${error.release ?? "unknown"}`,
     `Exception type: ${error.exceptionType ?? "unknown"}`,
