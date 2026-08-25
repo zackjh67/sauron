@@ -67,6 +67,7 @@ src/
   middleware.ts                        Basic Auth in front of the dashboard + investigation/settings APIs
   app/
     page.tsx, dashboard-actions.tsx    the queue dashboard (run/discard/pause)
+    projects/                          registry GUI (list/add/edit/enable/disable/delete)
     api/webhooks/sentry/route.ts       Sentry webhook receiver -> enqueues
     api/ingest/vercel-logs/route.ts    Vercel Log Drain receiver
     api/cron/daily-investigation/      once/day queue pop (Vercel Cron, CRON_SECRET-gated)
@@ -105,12 +106,13 @@ pointing that project's row at it — no code change.
 
 `projects` is keyed by `sentry_project_slug`, not by "the app" as a whole — if your frontend
 and your Supabase code live in separate repos and report to **separate Sentry projects**,
-that's already two rows, each pointing at its own `github_repo`. No code change needed, they
-can even share the same `supabase_project_ref` if it's genuinely one backend.
+that's already two rows in `/projects` (see below), each pointing at its own `github_repo`.
+They can even share the same `supabase_project_ref` if it's genuinely one backend.
 
 If a repo has no Vercel deployment at all (e.g. a repo that's purely Supabase migrations/Edge
-Functions), leave `vercel_project_id` null — the investigation simply won't be offered the
-`query_vercel_logs` tool for that project, rather than erroring on an id that doesn't exist.
+Functions), leave **Vercel project id** blank on that row — the investigation simply won't be
+offered the `query_vercel_logs` tool for that project, rather than erroring on an id that
+doesn't exist.
 
 The one case this *doesn't* handle: a single Sentry project whose errors could originate from
 either repo. There's no way to tell which repo to read from with that setup — you'd want
@@ -125,7 +127,7 @@ These happen in dashboards, not in this repo:
 | # | What | Where it lands |
 |---|------|-----------------|
 | 1 | Create a **dedicated ops Supabase project** (not one of the products it monitors), run every file in `supabase/migrations/` against it, in order, via the SQL editor | `SUPABASE_OPS_URL`, `SUPABASE_OPS_SERVICE_ROLE_KEY` |
-| 2 | Seed the `projects` table — one row per product app (Sentry slug, GitHub repo, Vercel project id, Supabase project ref, token refs) | — |
+| 2 | Add a project in the `/projects` GUI (once deployed) — one row per product app (Sentry slug, GitHub repo, Vercel project id, Supabase project ref, token refs) | — |
 | 3 | Register a **GitHub App** (Contents: read, Pull requests: write, Metadata: read), install it on every repo in the registry | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` |
 | 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Issue" resource enabled; also grab an API token | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
 | 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs` (needs a plan that supports Log Drains) | `LOG_DRAIN_SECRET` |
@@ -167,6 +169,14 @@ credential worth tracking this way — nothing else about the table is Supabase-
   until you resume.
 - **Recent** — the last 20 completed/failed/discarded investigations, with a link to the
   draft PR when one was opened.
+
+`/projects` manages the registry itself: list, add, edit, enable/disable, delete. The edit
+form separates the fields the app actually reads today from a "Reserved — not read by the app
+yet" section (`vercel_team_id`, `vercel_token_ref`, `slack_channel`) — filling those in doesn't
+do anything until something wires them up, and the form says so rather than pretending
+otherwise. Deleting a project fails if it has any investigation history (a foreign key stops
+it) — disable it instead if you just want to stop new investigations without losing that
+history.
 
 ## Local dev
 

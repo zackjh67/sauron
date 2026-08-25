@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { opsClient, type AppSettingsRow } from "@/lib/supabase-ops";
 import type { ParsedSentryError } from "@/lib/sentry";
 import type { Report } from "@/lib/investigate/tools";
@@ -69,6 +70,9 @@ export default async function Home() {
         <p>
           Status: <strong>{paused ? "Paused" : "Running"}</strong> — one automatic investigation/day, plus
           whatever you run below. <PauseToggle paused={paused} />
+        </p>
+        <p>
+          <Link href="/projects">Manage projects &rarr;</Link>
         </p>
       </section>
 
