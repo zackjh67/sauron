@@ -129,7 +129,7 @@ These happen in dashboards, not in this repo:
 | 1 | Create a **dedicated ops Supabase project** (not one of the products it monitors), run every file in `supabase/migrations/` against it, in order, via the SQL editor | `SUPABASE_OPS_URL`, `SUPABASE_OPS_SERVICE_ROLE_KEY` |
 | 2 | Add a project in the `/projects` GUI (once deployed) — one row per product app (Sentry slug, GitHub repo, Vercel project id, Supabase project ref, token refs) | — |
 | 3 | Register a **GitHub App** (Contents: read, Pull requests: write, Metadata: read), install it on every repo in the registry | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` |
-| 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Issue" resource enabled; also grab an API token | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
+| 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Error" resource enabled — not "Issue", see below; also grab an API token | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
 | 5 | Add a **Vercel Log Drain** per product project → `/api/ingest/vercel-logs` (needs a plan that supports Log Drains) | `LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
@@ -138,6 +138,24 @@ These happen in dashboards, not in this repo:
 
 Copy `.env.example` to `.env.local` for local dev; set the same vars on the Vercel project
 this app deploys to.
+
+### Setting up the Sentry integration
+
+One **internal integration** (org-wide, not a per-project one) so it can cover every project
+in your Sentry org:
+
+1. Sentry → **Settings → Developer Settings → New Internal Integration**.
+2. Under **Webhooks**, check **Error** — not "Issue". Sentry's "Issue" resource only fires on
+   issue lifecycle changes (created/resolved/assigned) with a `data.issue` payload; "Error"
+   fires on every captured event with the full exception/stack trace under `data.error`, which
+   is what `parseSentryErrorPayload` (`src/lib/sentry.ts`) actually reads.
+3. Set the **Webhook URL** to `https://<your-app>/api/webhooks/sentry`.
+4. Save. Sentry shows a **Client Secret** on the integration's page — that's `SENTRY_WEBHOOK_SECRET`,
+   used to verify the `sentry-hook-signature` header on every delivery.
+5. Separately, generate an **API token** (Settings → Auth Tokens, or the integration's own
+   token if you gave it read access to Issues & Events) for `SENTRY_API_TOKEN` — this is what
+   the `get_sentry_issue_events` tool uses to pull more sample events during an investigation.
+6. `SENTRY_ORG_SLUG` is the slug in your Sentry org's URL (`sentry.io/organizations/<this>/`).
 
 ### Tracking credential expiry
 
