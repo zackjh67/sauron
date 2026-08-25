@@ -4,7 +4,12 @@ import type { NextRequest } from "next/server";
 // These already verify themselves (Sentry HMAC signature, Vercel Log Drain
 // signature, Vercel's CRON_SECRET bearer token) — Basic Auth would just be
 // a second, incompatible gate on requests that aren't a browser.
-const SELF_AUTHENTICATED_PATHS = ["/api/webhooks/sentry", "/api/ingest/vercel-logs", "/api/cron/"];
+const SELF_AUTHENTICATED_PATHS = [
+  "/api/webhooks/sentry",
+  "/api/ingest/vercel-logs",
+  "/api/ingest/errors",
+  "/api/cron/",
+];
 
 export function middleware(req: NextRequest) {
   if (SELF_AUTHENTICATED_PATHS.some((p) => req.nextUrl.pathname.startsWith(p))) {

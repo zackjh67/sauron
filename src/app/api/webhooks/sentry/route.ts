@@ -1,4 +1,9 @@
-import { verifySentrySignature, SIGNATURE_HEADER, parseSentryErrorPayload } from "@/lib/sentry";
+import {
+  verifySentrySignature,
+  SIGNATURE_HEADER,
+  parseSentryErrorPayload,
+  isActionableSentryPayload,
+} from "@/lib/sentry";
 import { opsClient, type ProjectRow } from "@/lib/supabase-ops";
 
 export async function POST(req: Request) {
@@ -9,6 +14,13 @@ export async function POST(req: Request) {
   }
 
   const payload = JSON.parse(rawBody);
+
+  // The "Issue" webhook resource fires on resolved/ignored/assigned too, not
+  // just new issues — only "created" should ever start an investigation.
+  if (!isActionableSentryPayload(payload)) {
+    return new Response("ok", { status: 200 });
+  }
+
   const error = parseSentryErrorPayload(payload);
 
   if (!error.projectSlug) {

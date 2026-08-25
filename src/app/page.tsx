@@ -2,6 +2,7 @@ import Link from "next/link";
 import { opsClient, type AppSettingsRow } from "@/lib/supabase-ops";
 import type { ParsedSentryError } from "@/lib/sentry";
 import type { Report } from "@/lib/investigate/tools";
+import { errorSignature } from "@/lib/error-signature";
 import { RunButton, DiscardButton, PauseToggle } from "./dashboard-actions";
 
 export const dynamic = "force-dynamic";
@@ -12,11 +13,6 @@ interface QueuedRow {
   created_at: string;
   sentry_error: ParsedSentryError;
   projects: { name: string; enabled: boolean } | null;
-}
-
-/** Same project + exception type + message = the same underlying error, just fired again. */
-function duplicateSignature(q: QueuedRow): string {
-  return `${q.projects?.name ?? "?"}::${q.sentry_error.exceptionType ?? ""}::${q.sentry_error.message}`;
 }
 
 interface RecentRow {
@@ -56,7 +52,7 @@ export default async function Home() {
 
   const duplicateCounts = new Map<string, number>();
   for (const q of queued ?? []) {
-    const key = duplicateSignature(q);
+    const key = errorSignature(q.projects?.name, q.sentry_error);
     duplicateCounts.set(key, (duplicateCounts.get(key) ?? 0) + 1);
   }
   // Mirrors runNextAutoInvestigation's own filter (newest first, enabled projects only).
@@ -72,7 +68,8 @@ export default async function Home() {
           one automatic investigation/day, plus whatever you run below. <PauseToggle paused={paused} />
         </p>
         <p>
-          <Link href="/projects">Manage projects &rarr;</Link>
+          <Link href="/projects">Manage projects &rarr;</Link> &nbsp;
+          <Link href="/errors">Browse all errors &rarr;</Link>
         </p>
       </section>
 
@@ -94,7 +91,7 @@ export default async function Home() {
             </thead>
             <tbody>
               {queued.map((q) => {
-                const count = duplicateCounts.get(duplicateSignature(q)) ?? 1;
+                const count = duplicateCounts.get(errorSignature(q.projects?.name, q.sentry_error)) ?? 1;
                 return (
                   <tr key={q.id}>
                     <td>
@@ -162,6 +159,7 @@ export default async function Home() {
       <section>
         <h2>Endpoints</h2>
         <p>Sentry webhook: /api/webhooks/sentry</p>
+        <p>Error ingest (sauron-errors lib, Supabase pg_net): /api/ingest/errors</p>
         <p>Vercel log drain: /api/ingest/vercel-logs</p>
         <p>Daily cron: /api/cron/daily-investigation</p>
       </section>

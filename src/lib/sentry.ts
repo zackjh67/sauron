@@ -25,6 +25,8 @@ export interface SentryStackFrame {
 
 export interface ParsedSentryError {
   eventId: string;
+  /** Set when this came from the "Issue" webhook resource — pass to get_sentry_issue_events to pull a real event. */
+  issueId?: string;
   projectSlug: string;
   message: string;
   exceptionType?: string;
@@ -37,14 +39,48 @@ export interface ParsedSentryError {
 }
 
 /**
- * Sentry's "error" resource webhook payload shape. Field paths here follow
- * Sentry's documented internal-integration format as of writing — confirm
- * against a real captured payload during build-order step 2 (log `raw` on
- * the first test event) before relying on any single field.
+ * Only react to a genuinely new issue/event, not lifecycle noise (resolved,
+ * ignored, assigned, etc — the "Issue" resource fires webhooks for those too).
+ */
+export function isActionableSentryPayload(body: unknown): boolean {
+  const action = (body as Record<string, unknown> | null)?.action;
+  return action === undefined || action === "created";
+}
+
+/**
+ * Handles both Sentry webhook resources:
+ * - "Issue" (data.issue) — available on Team plan and above. Issue-level
+ *   fields only: title/culprit/metadata, no stack trace or per-event
+ *   environment/release. Pair with the get_sentry_issue_events tool to pull
+ *   an actual event during investigation.
+ * - "Error" (data.error) — per-event with full exception/stacktrace, but
+ *   gated behind a higher plan than Team as of writing.
+ * Confirmed against https://docs.sentry.io/organization/integrations/integration-platform/webhooks/issues/
+ * for the Issue shape; the Error shape was not re-verified against a live payload.
  */
 export function parseSentryErrorPayload(body: unknown): ParsedSentryError {
   const b = body as Record<string, unknown>;
   const data = (b.data ?? {}) as Record<string, unknown>;
+
+  if (data.issue) {
+    const issue = data.issue as Record<string, unknown>;
+    const metadata = (issue.metadata as Record<string, unknown> | undefined) ?? {};
+    const project = (issue.project as Record<string, unknown> | undefined) ?? {};
+    const issueId = String(issue.id ?? "");
+
+    return {
+      eventId: issueId,
+      issueId,
+      projectSlug: String(project.slug ?? ""),
+      message: String(metadata.value ?? issue.title ?? "unknown error"),
+      exceptionType: metadata.type as string | undefined,
+      culprit: issue.culprit as string | undefined,
+      frames: [],
+      issueUrl: (issue.permalink ?? issue.web_url) as string | undefined,
+      raw: body,
+    };
+  }
+
   const error = (data.error ?? data.event ?? {}) as Record<string, unknown>;
   const exceptionValues =
     ((error.exception as Record<string, unknown> | undefined)?.values as

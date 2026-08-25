@@ -54,6 +54,18 @@ Slack gets pinged on three occasions: an investigation finishes (with its report
 investigation fails (with the error — flagged as a likely credential problem when it looks
 like one), or a tracked credential is approaching/past its expiry date.
 
+## Errors without Sentry
+
+Sentry isn't the only way in. `/api/ingest/errors` accepts errors directly
+from the [`sauron-errors`](../error-reporter) npm library (Node/browser apps)
+or from a Supabase Postgres function/trigger via `pg_net` — see that
+package's README for both. Either way, the error lands in the exact same
+`investigations` queue as a Sentry webhook would, gets the same immediate
+Slack ping, and is eligible for the same daily-cron/dashboard investigation.
+This is meant to let you drop Sentry's subscription entirely once every
+project has switched over; the Sentry webhook path stays as-is in the
+meantime, so both can feed the queue side by side.
+
 ## Why it exists
 
 Manually triaging a Sentry alert usually means three tabs: GitHub for the code, Vercel for
@@ -67,8 +79,10 @@ src/
   middleware.ts                        Basic Auth in front of the dashboard + investigation/settings APIs
   app/
     page.tsx, dashboard-actions.tsx    the queue dashboard (run/discard/pause)
+    errors/                            browse *all* captured errors (any status), full stack detail
     projects/                          registry GUI (list/add/edit/enable/disable/delete)
     api/webhooks/sentry/route.ts       Sentry webhook receiver -> enqueues
+    api/ingest/errors/route.ts         non-Sentry error intake (sauron-errors lib, pg_net) -> enqueues
     api/ingest/vercel-logs/route.ts    Vercel Log Drain receiver
     api/cron/daily-investigation/      once/day queue pop (Vercel Cron, CRON_SECRET-gated)
     api/cron/check-credentials/        once/day expiry check -> Slack (same gating)
@@ -77,9 +91,11 @@ src/
     api/settings/pause/                dashboard pause/resume toggle
   lib/
     sentry.ts, sentry-api.ts           webhook verification + Sentry API
+    ingest-auth.ts                     shared ERROR_INGEST_SECRET bearer check
+    error-signature.ts                 project+type+message grouping, shared by both dashboards
     github.ts                          GitHub App auth, file reads, draft PRs
     vercel-logs.ts, supabase-logs.ts   log query helpers
-    slack.ts                          report/failure/credential-expiry notifications
+    slack.ts                          report/failure/credential-expiry/new-error notifications
     secrets.ts                         per-account credential resolution
     credential-expirations.ts          reads credential_expirations, flags what's due
     cron-auth.ts                       shared CRON_SECRET check for both cron routes
@@ -129,12 +145,13 @@ These happen in dashboards, not in this repo:
 | 1 | Create a **dedicated ops Supabase project** (not one of the products it monitors), run every file in `supabase/migrations/` against it, in order, via the SQL editor | `SUPABASE_OPS_URL`, `SUPABASE_OPS_SERVICE_ROLE_KEY` |
 | 2 | Add a project in the `/projects` GUI (once deployed) — one row per product app (Sentry slug, GitHub repo, Vercel project id, Supabase project ref, token refs) | — |
 | 3 | Register a **GitHub App** (Contents: read, Pull requests: write, Metadata: read), install it on every repo in the registry | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` |
-| 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Error" resource enabled — not "Issue", see below; also grab an API token | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
+| 4 | Create one **Sentry internal integration** (org-wide), webhook → `/api/webhooks/sentry`, "Issue" resource enabled (see below for why, and for both tokens it produces) | `SENTRY_WEBHOOK_SECRET`, `SENTRY_API_TOKEN`, `SENTRY_ORG_SLUG` |
 | 5 | Add a **Vercel Log Drain** per product project — endpoint URL must be the full path, `https://<your-app>/api/ingest/vercel-logs`, not just the domain — and copy its "Signature Verification Secret" into the env var (needs a plan that supports Drains) | `LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
 | 8 | Pick a dashboard password. `vercel.json` already schedules both crons (08:00/09:00 UTC — edit the cron expressions to taste; a Hobby plan caps you at 2 daily crons total, which is exactly what this uses) | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
 | 9 | For any credential with a known expiry (e.g. the Supabase management token, ~1 year) insert a row so you get a Slack warning as it approaches — see below | — |
+| 10 | *(Optional, only if you're moving off Sentry)* Generate a random string for the error-intake secret, then install [`sauron-errors`](../error-reporter) in each product app (or add the `pg_net` snippet from its README to a product Supabase project) pointed at this same value | `ERROR_INGEST_SECRET` |
 
 Copy `.env.example` to `.env.local` for local dev; set the same vars on the Vercel project
 this app deploys to.
@@ -145,17 +162,27 @@ One **internal integration** (org-wide, not a per-project one) so it can cover e
 in your Sentry org:
 
 1. Sentry → **Settings → Developer Settings → New Internal Integration**.
-2. Under **Webhooks**, check **Error** — not "Issue". Sentry's "Issue" resource only fires on
-   issue lifecycle changes (created/resolved/assigned) with a `data.issue` payload; "Error"
-   fires on every captured event with the full exception/stack trace under `data.error`, which
-   is what `parseSentryErrorPayload` (`src/lib/sentry.ts`) actually reads.
-3. Set the **Webhook URL** to `https://<your-app>/api/webhooks/sentry`.
-4. Save. Sentry shows a **Client Secret** on the integration's page — that's `SENTRY_WEBHOOK_SECRET`,
-   used to verify the `sentry-hook-signature` header on every delivery.
-5. Separately, generate an **API token** (Settings → Auth Tokens, or the integration's own
-   token if you gave it read access to Issues & Events) for `SENTRY_API_TOKEN` — this is what
-   the `get_sentry_issue_events` tool uses to pull more sample events during an investigation.
+2. Under **Permissions**, set **Issue & Event** to **Read**. This is what lets the integration's
+   token (step 5) call the API to fetch a real event later.
+3. Under **Webhooks**, check **Issue** — not "Error". Sentry's "Error" resource (per-event, full
+   exception/stack trace) needs a plan above Team, confirmed the hard way: Team grants "Issue"
+   but returns "org does not have access to the error subscription resource" for "Error". Issue
+   webhooks fire on lifecycle changes (created/resolved/assigned/etc, `data.issue` payload) —
+   `src/lib/sentry.ts` only reacts to `created`, and only gets issue-level fields, no stack
+   trace. `run.ts` handles that by telling Claude to call `get_sentry_issue_events` first when
+   no frames came with the webhook, using the Sentry API token from step 5.
+4. Set the **Webhook URL** to `https://<your-app>/api/webhooks/sentry`.
+5. Save. The integration's page now shows two separate credentials, don't confuse them:
+   - **Client Secret** → `SENTRY_WEBHOOK_SECRET`, verifies the `sentry-hook-signature` header on
+     incoming webhook deliveries.
+   - Under **Tokens** on that same page, the integration's own auto-generated API token →
+     `SENTRY_API_TOKEN`. This is what `get_sentry_issue_events` uses — it's the internal
+     integration's token (scoped by the Issue & Event: Read permission from step 2), not a
+     separate personal token from Settings → Auth Tokens.
 6. `SENTRY_ORG_SLUG` is the slug in your Sentry org's URL (`sentry.io/organizations/<this>/`).
+
+If you ever move to a plan with "Error" resource access, flip the webhook checkbox and
+`parseSentryErrorPayload` already handles both shapes — no other change needed.
 
 ### Tracking credential expiry
 
@@ -187,6 +214,11 @@ credential worth tracking this way — nothing else about the table is Supabase-
   until you resume.
 - **Recent** — the last 20 completed/failed/discarded investigations, with a link to the
   draft PR when one was opened.
+
+`/errors` is the full history, any status, not just the queue/last-20 — filterable by
+project and searchable by message/culprit, paginated 50 at a time. Click through to
+`/errors/[id]` for the full stack trace, environment/release, and (once it's run) the
+investigation's report/PR — this is the "simple error dashboard" half of dropping Sentry.
 
 `/projects` manages the registry itself: list, add, edit, enable/disable, delete. The edit
 form separates the fields the app actually reads today from a "Reserved — not read by the app

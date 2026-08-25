@@ -30,6 +30,7 @@ export async function investigate(project: ProjectRow, error: ParsedSentryError)
 
   const userPrompt = [
     `Sentry event: ${error.eventId}`,
+    ...(error.issueId ? [`Sentry issue ID: ${error.issueId}`] : []),
     `Project: ${project.name} (repo ${project.github_repo})`,
     ...(project.github_repo_subdir
       ? [
@@ -44,8 +45,12 @@ export async function investigate(project: ProjectRow, error: ParsedSentryError)
     `Culprit: ${error.culprit ?? "unknown"}`,
     `Sentry issue URL: ${error.issueUrl ?? "n/a"}`,
     "",
-    "Stack frames (most relevant last, per Sentry convention):",
-    JSON.stringify(error.frames, null, 2),
+    error.frames.length > 0
+      ? "Stack frames (most relevant last, per Sentry convention):\n" + JSON.stringify(error.frames, null, 2)
+      : "No stack trace came with this webhook (this project's Sentry plan only delivers issue-level " +
+          "fields, not full events, over the webhook). Your first step should be calling " +
+          "get_sentry_issue_events with the Sentry issue ID above to pull a real event — that's where " +
+          "the actual exception, stack trace, and release/environment for this issue live.",
   ].join("\n");
 
   const runner = client.beta.messages.toolRunner({

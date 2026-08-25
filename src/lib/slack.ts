@@ -50,6 +50,24 @@ export async function postInvestigationFailure(input: {
   await postToSlack(lines.join("\n"));
 }
 
+export async function postNewErrorAlert(input: {
+  projectName: string;
+  message: string;
+  exceptionType?: string;
+  culprit?: string;
+  dashboardUrl?: string;
+}): Promise<void> {
+  const title = input.exceptionType ? `${input.exceptionType}: ${input.message}` : input.message;
+  const lines = [
+    `:rotating_light: *[${input.projectName}]* new error`,
+    `*${title}*`,
+    input.culprit ? `_${input.culprit}_` : undefined,
+    input.dashboardUrl ? `<${input.dashboardUrl}|View in dashboard>` : undefined,
+  ].filter((line): line is string => line !== undefined);
+
+  await postToSlack(lines.join("\n"));
+}
+
 export async function postCredentialExpiryAlert(items: ExpiringCredential[]): Promise<void> {
   const lines = [
     ":hourglass_flowing_sand: *Credential expiry check*",
