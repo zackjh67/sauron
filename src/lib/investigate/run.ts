@@ -6,13 +6,16 @@ import { buildInvestigationTools, type Report } from "./tools";
 const client = new Anthropic();
 
 const SYSTEM_PROMPT = `You are investigating a production error reported by Sentry, for a codebase
-hosted on GitHub and running as Next.js functions on Vercel with a Supabase backend.
+hosted on GitHub. Depending on the project, it may run as Next.js functions on Vercel, as
+Supabase (Postgres/Edge Functions/Auth), or both — the tools you've been given for this
+investigation reflect what's actually relevant to this specific project, so don't assume a
+piece of infrastructure exists just because it would for a typical project; only reason about
+what you can actually see.
 
-You have tools to read the actual source at the commit that was running, and to query both
-Vercel function logs and Supabase logs (Postgres/Edge Functions/Auth) around the time of the
-error. Use them as needed — start from the stack trace, read the relevant files, and pull logs
-in a window around the event timestamp to see what request/state led here. Don't guess at code
-you haven't read.
+You have tools to read the actual source at the commit that was running, and to query whichever
+log sources apply here, around the time of the error. Use them as needed — start from the stack
+trace, read the relevant files, and pull logs in a window around the event timestamp to see what
+request/state led here. Don't guess at code you haven't read.
 
 When you have enough to explain what happened, call submit_report exactly once. If you can't
 identify a safe, well-scoped fix, still submit a report — set proposed_fix to null and explain

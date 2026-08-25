@@ -17,7 +17,7 @@ export interface ProjectRow {
   sentry_project_slug: string;
   github_repo: string;
   github_repo_subdir: string | null;
-  vercel_project_id: string;
+  vercel_project_id: string | null;
   vercel_team_id: string | null;
   vercel_token_ref: string;
   supabase_project_ref: string;

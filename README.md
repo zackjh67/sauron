@@ -101,6 +101,23 @@ project under a new account means adding a new env var (e.g. `VC_TOKEN_CLIENTX` 
 `VERCEL_TOKEN_CLIENTX`; Vercel rejects custom env vars starting with `VERCEL_`) and
 pointing that project's row at it — no code change.
 
+## One codebase, multiple repos
+
+`projects` is keyed by `sentry_project_slug`, not by "the app" as a whole — if your frontend
+and your Supabase code live in separate repos and report to **separate Sentry projects**,
+that's already two rows, each pointing at its own `github_repo`. No code change needed, they
+can even share the same `supabase_project_ref` if it's genuinely one backend.
+
+If a repo has no Vercel deployment at all (e.g. a repo that's purely Supabase migrations/Edge
+Functions), leave `vercel_project_id` null — the investigation simply won't be offered the
+`query_vercel_logs` tool for that project, rather than erroring on an id that doesn't exist.
+
+The one case this *doesn't* handle: a single Sentry project whose errors could originate from
+either repo. There's no way to tell which repo to read from with that setup — you'd want
+either separate Sentry projects (recommended, and probably how you already have it if your
+frontend and backend are meaningfully separate deploys), or a code change to let one project
+row reference multiple repos.
+
 ## One-time manual setup
 
 These happen in dashboards, not in this repo:

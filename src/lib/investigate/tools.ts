@@ -44,25 +44,30 @@ export function buildInvestigationTools(project: ProjectRow, onReport: (report: 
     run: async (input) => JSON.stringify(await listDir(project.github_repo, input.path, input.ref)),
   });
 
-  const queryVercelLogsTool = betaZodTool({
-    name: "query_vercel_logs",
-    description:
-      "Query this project's Vercel function logs (ingested via log drain) in a time window, optionally filtered by substring.",
-    inputSchema: z.object({
-      from_iso: z.string().describe("ISO 8601 start timestamp"),
-      to_iso: z.string().describe("ISO 8601 end timestamp"),
-      text_filter: z.string().optional().describe("Substring to match against the log message"),
-    }),
-    run: async (input) =>
-      JSON.stringify(
-        await queryVercelLogs({
-          vercelProjectId: project.vercel_project_id,
-          fromIso: input.from_iso,
-          toIso: input.to_iso,
-          textFilter: input.text_filter,
+  // Not every registered project deploys to Vercel — e.g. a repo that's
+  // purely Supabase Edge Functions/migrations. Skip offering the tool at
+  // all rather than let Claude call it and get a confusing empty result.
+  const queryVercelLogsTool = project.vercel_project_id
+    ? betaZodTool({
+        name: "query_vercel_logs",
+        description:
+          "Query this project's Vercel function logs (ingested via log drain) in a time window, optionally filtered by substring.",
+        inputSchema: z.object({
+          from_iso: z.string().describe("ISO 8601 start timestamp"),
+          to_iso: z.string().describe("ISO 8601 end timestamp"),
+          text_filter: z.string().optional().describe("Substring to match against the log message"),
         }),
-      ),
-  });
+        run: async (input) =>
+          JSON.stringify(
+            await queryVercelLogs({
+              vercelProjectId: project.vercel_project_id as string,
+              fromIso: input.from_iso,
+              toIso: input.to_iso,
+              textFilter: input.text_filter,
+            }),
+          ),
+      })
+    : null;
 
   const querySupabaseLogsTool = betaZodTool({
     name: "query_supabase_logs",
@@ -111,7 +116,7 @@ export function buildInvestigationTools(project: ProjectRow, onReport: (report: 
   return [
     readGithubFile,
     listGithubDir,
-    queryVercelLogsTool,
+    ...(queryVercelLogsTool ? [queryVercelLogsTool] : []),
     querySupabaseLogsTool,
     getSentryIssueEventsTool,
     submitReport,
