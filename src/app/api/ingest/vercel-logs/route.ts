@@ -1,23 +1,23 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { opsClient } from "@/lib/supabase-ops";
 
-// Vercel's self-serve custom Log Drains don't sign deliveries — there's no
-// built-in secret/HMAC mechanism. What the UI does offer is Custom Headers,
-// so the shared secret travels as one of those instead: add a header named
-// x-log-drain-secret with this value when configuring the drain.
-const SECRET_HEADER = "x-log-drain-secret";
-
-function isAuthorizedDrainRequest(req: Request): boolean {
+/**
+ * Vercel signs every Drain delivery with an `x-vercel-signature` header:
+ * hex(HMAC-SHA1(raw body, drain's Signature Verification Secret)). Confirmed
+ * against https://vercel.com/docs/drains/security — set LOG_DRAIN_SECRET to
+ * the exact "Signature Verification Secret" value shown when creating the
+ * drain (or paste your own chosen value into that field instead).
+ */
+function verifyVercelSignature(rawBody: string, signatureHeader: string | null): boolean {
   const secret = process.env.LOG_DRAIN_SECRET;
   if (!secret) throw new Error("LOG_DRAIN_SECRET not set");
+  if (!signatureHeader) return false;
 
-  const provided = req.headers.get(SECRET_HEADER);
-  if (!provided) return false;
-
-  const secretBuf = Buffer.from(secret, "utf8");
-  const providedBuf = Buffer.from(provided, "utf8");
-  if (secretBuf.length !== providedBuf.length) return false;
-  return timingSafeEqual(secretBuf, providedBuf);
+  const expected = createHmac("sha1", secret).update(Buffer.from(rawBody, "utf-8")).digest("hex");
+  const expectedBuf = Buffer.from(expected, "hex");
+  const gotBuf = Buffer.from(signatureHeader, "hex");
+  if (expectedBuf.length !== gotBuf.length) return false;
+  return timingSafeEqual(expectedBuf, gotBuf);
 }
 
 interface VercelLogEntry {
@@ -30,11 +30,13 @@ interface VercelLogEntry {
 }
 
 export async function POST(req: Request) {
-  if (!isAuthorizedDrainRequest(req)) {
-    return new Response("unauthorized", { status: 401 });
+  const rawBody = await req.text();
+
+  if (!verifyVercelSignature(rawBody, req.headers.get("x-vercel-signature"))) {
+    return new Response("invalid signature", { status: 401 });
   }
 
-  const entries = (await req.json()) as VercelLogEntry[];
+  const entries = JSON.parse(rawBody) as VercelLogEntry[];
   if (!Array.isArray(entries) || entries.length === 0) {
     return new Response("ok", { status: 200 });
   }
