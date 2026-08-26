@@ -4,6 +4,7 @@ export interface VercelLogQuery {
   vercelProjectId: string;
   fromIso: string;
   toIso: string;
+  level?: string;
   textFilter?: string;
   limit?: number;
 }
@@ -24,6 +25,10 @@ export async function queryVercelLogs(q: VercelLogQuery) {
     .lte("ts", q.toIso)
     .order("ts", { ascending: true })
     .limit(q.limit ?? 200);
+
+  if (q.level) {
+    query = query.eq("level", q.level);
+  }
 
   if (q.textFilter) {
     query = query.ilike("message", `%${q.textFilter}%`);

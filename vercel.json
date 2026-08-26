@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/check-credentials",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/log-sweep",
+      "schedule": "0 6,18 * * *"
     }
   ]
 }

@@ -66,6 +66,30 @@ This is meant to let you drop Sentry's subscription entirely once every
 project has switched over; the Sentry webhook path stays as-is in the
 meantime, so both can feed the queue side by side.
 
+## Log sweep — catches what nothing ever reports
+
+Sentry (and `sauron-errors`) can only surface what your own code explicitly reports. A
+failure entirely inside a platform's managed internals — the incident that prompted this:
+Supabase Auth's SMTP sending broke, silently, with no exception anywhere in app code — never
+reaches either path, because nothing ever told them about it.
+
+`/api/cron/log-sweep` runs twice a day (06:00/18:00 UTC) and doesn't wait to be told. For
+every enabled project it pulls the last ~13 hours of raw Supabase logs (`postgres_logs`,
+`edge_logs`, `function_edge_logs`, `auth_logs`) and this project's own ingested Vercel logs
+(`level = 'error'`), then keyword-matches (`error`/`exception`/`fatal`/`panic`/`uncaught`)
+client-side — one query per source per project, not per keyword. A clean sweep costs nothing:
+no Slack post, no database write. Anything matched gets queued into the exact same
+`investigations` table as a Sentry webhook or `sauron-errors` call would (`src/lib/log-sweep.ts`
++ `src/app/api/cron/log-sweep/route.ts`) — same dashboard, same pause/discard/"Run now" with
+its model/effort picker. **The sweep never spends Claude tokens itself** — it only queues;
+running the investigation is still your call.
+
+Deliberately dumb on purpose: no NLP, no LLM call, just a substring match over whatever the
+Supabase Management API and your own `vercel_logs` table return, so it stays close to free
+to run regardless of how many projects or how much log volume you have. Expect some false
+positives (discard them) — the risk being guarded against is a false *negative*, i.e. missing
+a real platform-level failure entirely, which is what happened before this existed.
+
 ## Why it exists
 
 Manually triaging a Sentry alert usually means three tabs: GitHub for the code, Vercel for
@@ -86,6 +110,7 @@ src/
     api/ingest/vercel-logs/route.ts    Vercel Log Drain receiver
     api/cron/daily-investigation/      once/day queue pop (Vercel Cron, CRON_SECRET-gated)
     api/cron/check-credentials/        once/day expiry check -> Slack (same gating)
+    api/cron/log-sweep/                twice/day raw Supabase+Vercel log scan -> queue (same gating)
     api/investigations/[id]/run/       dashboard "run now" (accepts {model, effort})
     api/investigations/[id]/rerun/     dashboard "re-run" — clones then runs (accepts {model, effort})
     api/investigations/[id]/discard/   dashboard "discard"
@@ -99,7 +124,8 @@ src/
     slack.ts                          report/failure/credential-expiry/new-error notifications
     secrets.ts                         per-account credential resolution
     credential-expirations.ts          reads credential_expirations, flags what's due
-    cron-auth.ts                       shared CRON_SECRET check for both cron routes
+    cron-auth.ts                       shared CRON_SECRET check across cron routes
+    log-sweep.ts                       raw Supabase/Vercel log scan, keyword-filtered client-side
     investigate/
       queue.ts                        claim/run/discard/clone queue items, pause flag
       model-options.ts                 selectable models/effort levels + defaults (Sonnet 5/medium)
@@ -151,7 +177,7 @@ These happen in dashboards, not in this repo:
 | 5 | Add a **Vercel Log Drain** per product project — endpoint URL must be the full path, `https://<your-app>/api/ingest/vercel-logs`, not just the domain — and copy its "Signature Verification Secret" into the env var (needs a plan that supports Drains) | `LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
-| 8 | Pick a dashboard password. `vercel.json` already schedules both crons (08:00/09:00 UTC — edit the cron expressions to taste; a Hobby plan caps you at 2 daily crons total, which is exactly what this uses) | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
+| 8 | Pick a dashboard password. `vercel.json` already schedules all three crons (06:00/18:00/08:00/09:00 UTC — edit the expressions to taste). Needs Vercel Pro or above: Log Drains already required that, and 3 crons exceeds Hobby's 2-per-project cap anyway | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
 | 9 | For any credential with a known expiry (e.g. the Supabase management token, ~1 year) insert a row so you get a Slack warning as it approaches — see below | — |
 | 10 | *(Optional, only if you're moving off Sentry)* Generate a random string for the error-intake secret, then install [`sauron-errors`](../error-reporter) in each product app (or add the `pg_net` snippet from its README to a product Supabase project) pointed at this same value | `ERROR_INGEST_SECRET` |
 
@@ -296,3 +322,14 @@ npm run dev
   which bypasses RLS entirely, so a default-deny for `anon`/`authenticated` is all that's
   needed. If you ever add a client-side/browser consumer of this data, it'll need real
   policies, not this.
+- **The log sweep only catches what gets logged somewhere.** It doesn't actively exercise
+  anything (no test signups, no synthetic emails) — it's a passive scan of whatever Supabase
+  and Vercel already recorded. If a platform-level failure produces zero log output anywhere
+  (which may be true of some Auth/SMTP failure modes specifically — never fully confirmed),
+  this won't see it either; only an active canary that verifies a real outcome (e.g. checking
+  a test inbox for actual delivery) would close that gap, and that's deliberately not what
+  this is.
+- **Log sweep keyword matching is a plain substring check**, not per-source-aware (e.g. it
+  doesn't parse `edge_logs`' structured HTTP status codes to catch 5xx responses that don't
+  literally contain the word "error"). Cheap and broad by design; tighten it once you've seen
+  what a few real sweeps actually turn up.
