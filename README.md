@@ -73,16 +73,20 @@ failure entirely inside a platform's managed internals — the incident that pro
 Supabase Auth's SMTP sending broke, silently, with no exception anywhere in app code — never
 reaches either path, because nothing ever told them about it.
 
-`/api/cron/log-sweep` runs twice a day (06:00/18:00 UTC) and doesn't wait to be told. For
-every enabled project it pulls the last ~13 hours of raw Supabase logs (`postgres_logs`,
+`/api/cron/log-sweep` runs once a day (06:00 UTC) and doesn't wait to be told. For every
+enabled project it pulls the last ~25 hours of raw Supabase logs (`postgres_logs`,
 `edge_logs`, `function_edge_logs`, `auth_logs`) and this project's own ingested Vercel logs
 (`level = 'error'`), then keyword-matches (`error`/`exception`/`fatal`/`panic`/`uncaught`)
 client-side — one query per source per project, not per keyword. A clean sweep costs nothing:
 no Slack post, no database write. Anything matched gets queued into the exact same
 `investigations` table as a Sentry webhook or `sauron-errors` call would (`src/lib/log-sweep.ts`
 + `src/app/api/cron/log-sweep/route.ts`) — same dashboard, same pause/discard/"Run now" with
-its model/effort picker. **The sweep never spends Claude tokens itself** — it only queues;
-running the investigation is still your call.
+its model/effort picker, **except it's tagged `origin: "log-sweep"` and explicitly excluded
+from the automatic daily-investigation cron** (`runNextAutoInvestigation` in
+`src/lib/investigate/queue.ts`), unlike a normal Sentry/`sauron-errors` item. This is a
+passive scan result, not a reported error — it should never get auto-run with real money
+spent on it just because it happened to be the newest thing in the queue when the daily cron
+fired. "Run now"/"Re-run" still work on it identically; that's the only way it ever runs.
 
 Deliberately dumb on purpose: no NLP, no LLM call, just a substring match over whatever the
 Supabase Management API and your own `vercel_logs` table return, so it stays close to free
@@ -110,7 +114,7 @@ src/
     api/ingest/vercel-logs/route.ts    Vercel Log Drain receiver
     api/cron/daily-investigation/      once/day queue pop (Vercel Cron, CRON_SECRET-gated)
     api/cron/check-credentials/        once/day expiry check -> Slack (same gating)
-    api/cron/log-sweep/                twice/day raw Supabase+Vercel log scan -> queue (same gating)
+    api/cron/log-sweep/                daily raw Supabase+Vercel log scan -> queue, never auto-run
     api/investigations/[id]/run/       dashboard "run now" (accepts {model, effort})
     api/investigations/[id]/rerun/     dashboard "re-run" — clones then runs (accepts {model, effort})
     api/investigations/[id]/discard/   dashboard "discard"
@@ -177,7 +181,7 @@ These happen in dashboards, not in this repo:
 | 5 | Add a **Vercel Log Drain** per product project — endpoint URL must be the full path, `https://<your-app>/api/ingest/vercel-logs`, not just the domain — and copy its "Signature Verification Secret" into the env var (needs a plan that supports Drains) | `LOG_DRAIN_SECRET` |
 | 6 | Add a **Slack incoming webhook** for the channel reports post to | `SLACK_WEBHOOK_URL` |
 | 7 | Anthropic API key | `ANTHROPIC_API_KEY` |
-| 8 | Pick a dashboard password. `vercel.json` already schedules all three crons (06:00/18:00/08:00/09:00 UTC — edit the expressions to taste). Needs Vercel Pro or above: Log Drains already required that, and 3 crons exceeds Hobby's 2-per-project cap anyway | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
+| 8 | Pick a dashboard password. `vercel.json` already schedules all three crons (06:00/08:00/09:00 UTC — edit the expressions to taste). Needs Vercel Pro or above: Log Drains already required that, and 3 crons exceeds Hobby's 2-per-project cap anyway | `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `CRON_SECRET` |
 | 9 | For any credential with a known expiry (e.g. the Supabase management token, ~1 year) insert a row so you get a Slack warning as it approaches — see below | — |
 | 10 | *(Optional, only if you're moving off Sentry)* Generate a random string for the error-intake secret, then install [`sauron-errors`](../error-reporter) in each product app (or add the `pg_net` snippet from its README to a product Supabase project) pointed at this same value | `ERROR_INGEST_SECRET` |
 

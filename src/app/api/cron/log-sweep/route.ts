@@ -8,7 +8,7 @@ import type { ParsedSentryError } from "@/lib/sentry";
 export const maxDuration = 300;
 
 /**
- * Twice-daily sweep of raw Supabase + Vercel logs, independent of Sentry or
+ * Daily sweep of raw Supabase + Vercel logs, independent of Sentry or
  * any app code explicitly reporting anything — catches platform-level
  * failures (e.g. a Supabase Auth/SMTP misconfiguration) that never produce
  * an exception in code Sentry instruments. A clean sweep costs nothing: no
@@ -29,7 +29,7 @@ export async function GET(req: Request) {
   }
 
   const toIso = new Date().toISOString();
-  const fromIso = new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(); // > 12h cron interval, covers drift
+  const fromIso = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(); // > 24h cron interval, covers drift
 
   let queuedCount = 0;
 
@@ -57,6 +57,10 @@ export async function GET(req: Request) {
       project_id: project.id,
       sentry_error: parsedError,
       status: "queued",
+      // Never eligible for the automatic daily cron — see runNextAutoInvestigation.
+      // This is a passive log-scan hit, not a reported error; only a human
+      // clicking "Run now" should ever spend Claude tokens on it.
+      origin: "log-sweep",
     });
 
     if (insertError) {

@@ -70,7 +70,7 @@ export async function postNewErrorAlert(input: {
 
 export async function postLogSweepAlert(input: { count: number; dashboardUrl?: string }): Promise<void> {
   const lines = [
-    `:mag: *Log sweep*: ${input.count} project(s) had error-like log entries, queued for review`,
+    `:mag: *Log sweep*: ${input.count} project(s) had error-like log entries — queued for manual review, won't run automatically`,
     input.dashboardUrl ? `<${input.dashboardUrl}|View in dashboard>` : undefined,
   ].filter((line): line is string => line !== undefined);
   await postToSlack(lines.join("\n"));

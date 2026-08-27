@@ -80,6 +80,9 @@ export async function runNextAutoInvestigation(): Promise<string | null> {
     .select("id, projects!inner(enabled)")
     .eq("status", "queued")
     .eq("projects.enabled", true)
+    // Log-sweep hits are a passive scan, not a reported error — never
+    // auto-run, only ever run by a human clicking "Run now"/"Re-run".
+    .or("origin.is.null,origin.neq.log-sweep")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<{ id: string }>();

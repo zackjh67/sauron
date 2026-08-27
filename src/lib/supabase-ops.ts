@@ -35,6 +35,7 @@ export interface InvestigationRow {
   sentry_error: unknown;
   status: InvestigationStatus;
   run_trigger: "auto" | "manual" | null;
+  origin: "log-sweep" | null;
   model: string | null;
   effort: string | null;
   report: unknown;
